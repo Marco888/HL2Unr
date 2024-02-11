@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.7.34024.191
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HLWadExp", "HLWadExp.vcxproj", "{6E0B7203-3EC7-4818-8A43-0EF9555D531D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6E0B7203-3EC7-4818-8A43-0EF9555D531D}.Release|x86.ActiveCfg = Release|Win32
+		{6E0B7203-3EC7-4818-8A43-0EF9555D531D}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3596EEB1-23B8-4878-AC79-C4945616D6AF}
+	EndGlobalSection
+EndGlobal
