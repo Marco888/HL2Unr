@@ -11,6 +11,7 @@
     <ClCompile Include="Src\HLExporter.cpp" />
     <ClCompile Include="Src\HLTexImporter.cpp" />
     <ClCompile Include="Src\HLTitleLoader.cpp" />
+    <ClCompile Include="Src\HLVoiceLineParse.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Src\HLBSP.h" />

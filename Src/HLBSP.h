@@ -88,6 +88,67 @@
 #define	MAX_KEY		32
 #define	MAX_VALUE	1024
 
+// instant damage
+
+#define DMG_GENERIC 0			 // generic damage was done
+#define DMG_CRUSH (1 << 0)		 // crushed by falling or moving object
+#define DMG_BULLET (1 << 1)		 // shot
+#define DMG_SLASH (1 << 2)		 // cut, clawed, stabbed
+#define DMG_BURN (1 << 3)		 // heat burned
+#define DMG_FREEZE (1 << 4)		 // frozen
+#define DMG_FALL (1 << 5)		 // fell too far
+#define DMG_BLAST (1 << 6)		 // explosive blast damage
+#define DMG_CLUB (1 << 7)		 // crowbar, punch, headbutt
+#define DMG_SHOCK (1 << 8)		 // electric shock
+#define DMG_SONIC (1 << 9)		 // sound pulse shockwave
+#define DMG_ENERGYBEAM (1 << 10) // laser or other high energy beam
+#define DMG_NEVERGIB (1 << 12)	 // with this bit OR'd in, no damage type will be able to gib victims upon death
+#define DMG_ALWAYSGIB (1 << 13)	 // with this bit OR'd in, any damage type can be made to gib victims upon death.
+
+// time-based damage
+//mask off TF-specific stuff too
+#define DMG_TIMEBASED (~(0xff003fff)) // mask for time-based damage
+
+#define DMG_DROWN (1 << 14) // Drowning
+#define DMG_FIRSTTIMEBASED DMG_DROWN
+
+#define DMG_PARALYZE (1 << 15)	   // slows affected creature down
+#define DMG_NERVEGAS (1 << 16)	   // nerve toxins, very bad
+#define DMG_POISON (1 << 17)	   // blood poisioning
+#define DMG_RADIATION (1 << 18)	   // radiation exposure
+#define DMG_DROWNRECOVER (1 << 19) // drowning recovery
+#define DMG_ACID (1 << 20)		   // toxic chemicals or acid burns
+#define DMG_SLOWBURN (1 << 21)	   // in an oven
+#define DMG_SLOWFREEZE (1 << 22)   // in a subzero freezer
+#define DMG_MORTAR (1 << 23)	   // Hit by air raid (done to distinguish grenade from mortar)
+
+//TF ADDITIONS
+#define DMG_IGNITE (1 << 24)	   // Players hit by this begin to burn
+#define DMG_RADIUS_MAX (1 << 25)   // Radius damage with this flag doesn't decrease over distance
+#define DMG_RADIUS_QUAKE (1 << 26) // Radius damage is done like Quake. 1/2 damage at 1/2 radius.
+#define DMG_IGNOREARMOR (1 << 27)  // Damage ignores target's armor
+#define DMG_AIMED (1 << 28)		   // Does Hit location damage
+#define DMG_WALLPIERCING (1 << 29) // Blast Damages ents through walls
+
+#define DMG_CALTROP (1 << 30)
+#define DMG_HALLUC (1 << 31)
+
+// TF Healing Additions for TakeHealth
+#define DMG_IGNORE_MAXHEALTH DMG_IGNITE
+// TF Redefines since we never use the originals
+#define DMG_NAIL DMG_SLASH
+#define DMG_NOT_SELF DMG_FREEZE
+
+
+#define DMG_TRANQ DMG_MORTAR
+#define DMG_CONCUSS DMG_SONIC
+
+// these are the damage types that are allowed to gib corpses
+#define DMG_GIB_CORPSE (DMG_CRUSH | DMG_FALL | DMG_BLAST | DMG_SONIC | DMG_CLUB)
+
+// these are the damage types that have client hud art
+#define DMG_SHOWNHUD (DMG_POISON | DMG_ACID | DMG_FREEZE | DMG_SLOWFREEZE | DMG_DROWN | DMG_BURN | DMG_SLOWBURN | DMG_NERVEGAS | DMG_RADIATION | DMG_SHOCK)
+
 
 // ------------------------------------------------------------------------------------------------ //
 // Displacement neighbor rules
@@ -478,7 +539,7 @@ struct BSPMODEL
 	friend FArchive& operator<<(FArchive& Ar, BSPMODEL& m)
 	{
 		Ar.Serialize(m.nMins, sizeof(BSPMODEL::nMins));
-		Ar.Serialize(m.nMins, sizeof(BSPMODEL::nMaxs));
+		Ar.Serialize(m.nMaxs, sizeof(BSPMODEL::nMaxs));
 		Ar << m.vOrigin;
 		Ar.Serialize(m.iHeadnodes, sizeof(BSPMODEL::iHeadnodes));
 		Ar << m.nVisLeafs << m.iFirstFace << m.nFaces;
@@ -503,11 +564,125 @@ struct BSPTEXTUREINFO
 };
 constexpr INT BSPTEXTUREINFO_size = sizeof(FLOAT) * (3*2+2) + sizeof(INT) * 2;
 
+constexpr INT INT_NF = -9999999; // Int not found!
+constexpr FLOAT FLOAT_NF = -9999999.f; // Float not found!
+
+struct CModel;
+struct FEntListData;
+class CMapLoadHelper;
+
 struct FEntListData
 {
 	struct FEntity
 	{
+		friend FEntListData;
+	private:
 		TMap<FName, FString> KeyMap;
+		INT SpawnFlags;
+		FName ClassName;
+
+		void Init();
+
+	public:
+		DWORD SpecialFlags, ExportFlags;
+		void* EntData;
+		CModel* pendingModel;
+
+		FVector Location;
+		FRotator Rotation;
+
+		FEntity()
+			: SpawnFlags(0), ClassName(NAME_None), SpecialFlags(0), ExportFlags(0), EntData(nullptr), pendingModel(nullptr), Location(0.f, 0.f, 0.f), Rotation(0, 0, 0)
+		{
+		}
+		FName GetClass() const
+		{
+			return ClassName;
+		}
+		UBOOL IsClass(const TCHAR* inName) const
+		{
+			return (appStricmp(*ClassName, inName) == NULL);
+		}
+		UBOOL DeleteValue(const TCHAR* keyName)
+		{
+			guardSlow(FEntity::DeleteValue);
+			FName nKeyName(keyName, FNAME_Find);
+			if (nKeyName == NAME_None)
+				return FALSE;
+			return (KeyMap.Remove(nKeyName) > 0);
+			unguardSlow;
+		}
+		void SetValue(const TCHAR* keyName, const TCHAR* newValue)
+		{
+			guardSlow(FEntity::SetValue);
+			FName nKeyName(keyName);
+			if (!newValue)
+			{
+				KeyMap.Remove(nKeyName);
+				return;
+			}
+			auto* Result = KeyMap.Find(nKeyName);
+			if (Result)
+				*Result = newValue;
+			else KeyMap.Set(nKeyName, newValue);
+			unguardSlow;
+		}
+		const TCHAR* Value(const TCHAR* keyName) const
+		{
+			guardSlow(FEntity::Value);
+			FName nKeyName(keyName, FNAME_Find);
+			if (nKeyName == NAME_None)
+				return nullptr;
+			const FString* Found = KeyMap.Find(keyName);
+			return Found ? **Found : nullptr;
+			unguardSlow;
+		}
+		const TCHAR* StrValue(const TCHAR* keyName, const TCHAR* defaultValue) const
+		{
+			guardSlow(FEntity::StrValue);
+			const TCHAR* Found = Value(keyName);
+			return Found ? Found : defaultValue;
+			unguardSlow;
+		}
+		INT IntValue(const TCHAR* keyName, INT defaultValue = INT_NF) const
+		{
+			guardSlow(FEntity::IntValue);
+			const TCHAR* Found = Value(keyName);
+			return Found ? appAtoi(Found) : defaultValue;
+			unguardSlow;
+		}
+		FLOAT FloatValue(const TCHAR* keyName, FLOAT defaultValue = FLOAT_NF) const
+		{
+			guardSlow(FEntity::FloatValue);
+			const TCHAR* Found = Value(keyName);
+			return Found ? appAtof(Found) : defaultValue;
+			unguardSlow;
+		}
+		INT GetModelBrushNum() const
+		{
+			guardSlow(FEntity::GetModelBrushNum);
+			const TCHAR* Found = Value(TEXT("Model"));
+			if (!Found || Found[0]!='*')
+				return INDEX_NONE;
+			return appAtoi(Found + 1);
+			unguardSlow;
+		}
+		auto MapIterator() const
+		{
+			return KeyMap.Iterator();
+		}
+		UBOOL HasSpawnFlag(const INT inFlag) const
+		{
+			return (SpawnFlags & inFlag) != 0;
+		}
+		UBOOL HasExportFlag(const DWORD inFlag) const
+		{
+			return (ExportFlags & inFlag) != 0;
+		}
+		INT GetSpawnFlags() const
+		{
+			return SpawnFlags;
+		}
 	};
 	TArray<FEntity*> EntList;
 
@@ -517,8 +692,9 @@ struct FEntListData
 		Clear();
 	}
 	void LoadFrom(const TCHAR* String);
+	void StripBogusEnts();
 
-	FEntity* FindEntity(const TCHAR* EntName) const;
+	FEntity* FindEntity(const TCHAR* EntName, const TCHAR* EventName = nullptr, const TCHAR* EventKeyName = nullptr) const;
 	void DumpEntities() const;
 };
 
@@ -584,7 +760,7 @@ class CMapLoadHelper
 		FMapTex(const TCHAR* InName, INT inX, INT inY);
 	};
 	FArchive& Loader;
-	FString MapFile;
+	FString MapFile, MapFileURL;
 	BSPHEADER bspHeader;
 	//dheader_t s_MapHeader;
 
@@ -603,6 +779,18 @@ class CMapLoadHelper
 
 	TMap<FName, FColor> TexLightMap;
 
+	struct FBspLight
+	{
+		FPlane LightColor;
+		FVector Location, Normal;
+		FRotator Rotation;
+	};
+	TArray<FBspLight> BspLights;
+
+	// Settings
+	BITFIELD bMergeSurfs : 1; // Should merge BSP surfs automatically.
+	BITFIELD bDumpEnts : 1; // Dump ents data to log.
+
 	void LoadEntities();
 	void LoadPlanes();
 	void LoadTextures();
@@ -614,23 +802,35 @@ class CMapLoadHelper
 	void LoadTexInfos();
 
 	void ExportEntity(const TCHAR* EntName, FOutputDevice& Out);
+	void ConvertAnimator(FOutputDevice& Out, FEntListData::FEntity& Entity);
+
+	void AddStaticLight(const FPoly& Poly, const FVector& Offset, UBOOL bFlippedNormal);
+	void DumpBspLights(FOutputDevice& Out);
 
 public:
 	HLTitleManager Titles;
 
-	CMapLoadHelper(FArchive& InAr, const TCHAR* FileURL)
-		: Loader(InAr), MapFile(FString::GetFilenameOnlyStr(FileURL)), iModelIndex(2), Titles(FileURL)
-	{}
+	CMapLoadHelper(FArchive& InAr, const TCHAR* inFileURL);
+
 	UBOOL Load();
 	void ExportMap(FOutputDevice& Out);
 
-	void WriteModel(const BSPMODEL& Model, FOutputDevice& Out, const UBOOL bWorld, const UBOOL bAddTextures, const UBOOL bCenterModel, const UBOOL bIsMover);
+	void WriteModel(const BSPMODEL& Model, FOutputDevice& Out, const UBOOL bWorld, const UBOOL bAddTextures, const UBOOL bCenterModel, const UBOOL bIsMover, DWORD ForceFlags = 0, INT RotateModel = 0);
+	void WriteCModel(CModel* CModel, FOutputDevice& Out, const UBOOL bWorld, const UBOOL bAddTextures, const UBOOL bCenterModel, const UBOOL bIsMover, DWORD ForceFlags = 0, INT RotateModel = 0);
+	CModel* BuildModel(const BSPMODEL& Model);
 
-	inline const TCHAR* GetMapName() const
+	void WriteModelOrigin(FOutputDevice& Out, FEntListData::FEntity& Entity);
+	void WriteModelVolume(FOutputDevice& Out, FEntListData::FEntity& Entity);
+
+	const TCHAR* GetMapName() const
 	{
 		return *MapFile;
 	}
-	inline BSPMODEL* GetModel(INT Index)
+	const TCHAR* GetMapURL() const
+	{
+		return *MapFileURL;
+	}
+	BSPMODEL* GetModel(INT Index)
 	{
 		return map_models.IsValidIndex(Index) ? &map_models(Index) : nullptr;
 	}
